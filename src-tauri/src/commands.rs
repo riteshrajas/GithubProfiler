@@ -124,6 +124,53 @@ fn add_log(state: &State<AppState>, message: &str, log_type: &str) {
     }
 }
 
+fn run_git(args: &[&str]) -> Result<std::process::Output, String> {
+    Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|e| format!("git execution failed: {}", e))
+}
+
+fn read_git_config_value(key: &str, state: &State<AppState>) -> Option<String> {
+    match run_git(&["config", "--global", key]) {
+        Ok(output) if output.status.success() => Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            add_log(state, &format!("git config {} failed: {}", key, stderr.trim()), "error");
+            None
+        }
+        Err(err) => {
+            add_log(state, &err, "error");
+            None
+        }
+    }
+}
+
+fn detect_credential_helpers(state: &State<AppState>) -> Result<Vec<String>, String> {
+    let output = run_git(&["config", "--global", "--get-all", "credential.helper"])?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!("git credential.helper query failed: {}", stderr));
+    }
+
+    let helpers = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .collect::<Vec<_>>();
+
+    if helpers.is_empty() {
+        Ok(vec![])
+    } else {
+        add_log(
+            state,
+            &format!("Detected credential helpers: {}", helpers.join(", ")),
+            "info",
+        );
+        Ok(helpers)
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAURI COMMANDS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -220,21 +267,41 @@ pub fn switch_identity(state: State<AppState>) -> Result<String, String> {
     add_log(&state, &format!("git config --global user.email \"{}\"", email), "command");
     
     // Execute git commands
-    let name_result = Command::new("git")
-        .args(["config", "--global", "user.name", &name])
-        .output();
-    
-    let email_result = Command::new("git")
-        .args(["config", "--global", "user.email", &email])
-        .output();
-    
+    let name_result = run_git(&["config", "--global", "user.name", &name]);
+    let email_result = run_git(&["config", "--global", "user.email", &email]);
+
     match (name_result, email_result) {
-        (Ok(_), Ok(_)) => {
-            add_log(&state, "✓ Identity switched successfully", "success");
-            Ok(format!("Switched to {} <{}>", name, email))
+        (Ok(name_out), Ok(email_out)) => {
+            let mut errors = Vec::new();
+
+            if !name_out.status.success() {
+                let stderr = String::from_utf8_lossy(&name_out.stderr).trim().to_string();
+                errors.push(format!("user.name: {}", stderr));
+            }
+
+            if !email_out.status.success() {
+                let stderr = String::from_utf8_lossy(&email_out.stderr).trim().to_string();
+                errors.push(format!("user.email: {}", stderr));
+            }
+
+            if errors.is_empty() {
+                add_log(&state, "✓ Identity switched successfully", "success");
+                Ok(format!("Switched to {} <{}>", name, email))
+            } else {
+                add_log(
+                    &state,
+                    &format!("✗ Failed to switch identity: {}", errors.join("; ")),
+                    "error",
+                );
+                Err("Failed to execute git config commands".to_string())
+            }
         }
-        _ => {
-            add_log(&state, "✗ Failed to switch identity", "error");
+        (Err(err), Ok(_)) | (Ok(_), Err(err)) => {
+            add_log(&state, &err, "error");
+            Err("Failed to execute git config commands".to_string())
+        }
+        (Err(err1), Err(err2)) => {
+            add_log(&state, &format!("{}; {}", err1, err2), "error");
             Err("Failed to execute git config commands".to_string())
         }
     }
@@ -244,29 +311,46 @@ pub fn switch_identity(state: State<AppState>) -> Result<String, String> {
 pub fn check_credentials(state: State<AppState>) -> CredentialStatus {
     let mut has_conflict = false;
 
-    // Check for credential manager
-    if let Ok(output) = Command::new("git").args(["config", "--list"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.contains("credential.helper=manager") {
-            has_conflict = true;
-            add_log(&state, "Credential Manager conflict detected", "error");
+    const CONFLICT_HELPERS: &[&str] = &["manager", "manager-core", "wincred", "osxkeychain"];
+    const KNOWN_HELPERS: &[&str] = &["store", "cache", "libsecret", "gpg", "gpg2", "gnome-keyring"];
+
+    match detect_credential_helpers(&state) {
+        Ok(helpers) => {
+            for helper in helpers {
+                let helper_lower = helper.to_lowercase();
+                if CONFLICT_HELPERS.iter().any(|c| helper_lower.contains(c)) {
+                    has_conflict = true;
+                    add_log(
+                        &state,
+                        &format!(
+                            "Credential helper '{}' may override Git-Shift profiles; consider unsetting",
+                            helper
+                        ),
+                        "error",
+                    );
+                    break;
+                }
+
+                if !KNOWN_HELPERS.iter().any(|k| helper_lower.contains(k)) {
+                    add_log(
+                        &state,
+                        &format!("Unknown credential helper '{}'; ensure it won't conflict", helper),
+                        "info",
+                    );
+                }
+            }
+        }
+        Err(err) => {
+            add_log(&state, &err, "error");
         }
     }
 
     // Auto-detect active profile
     let active_profile_index = {
         let profiles = state.profiles.lock().unwrap();
-        let current_name = Command::new("git")
-            .args(["config", "--global", "user.name"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
-        
-        let current_email = Command::new("git")
-            .args(["config", "--global", "user.email"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
+        let current_name = read_git_config_value("user.name", &state).unwrap_or_default();
+
+        let current_email = read_git_config_value("user.email", &state).unwrap_or_default();
 
         let found_idx = profiles.iter().position(|p| p.name == current_name && p.email == current_email);
 
@@ -287,18 +371,25 @@ pub fn check_credentials(state: State<AppState>) -> CredentialStatus {
 
 #[tauri::command]
 pub fn override_credentials(state: State<AppState>) -> Result<(), String> {
-    let result = Command::new("git")
-        .args(["config", "--global", "--unset", "credential.helper"])
-        .output();
-    
+    let result = run_git(&["config", "--global", "--unset", "credential.helper"]);
+
     match result {
-        Ok(_) => {
+        Ok(output) if output.status.success() => {
             add_log(&state, "Credential manager override applied", "success");
             Ok(())
         }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            add_log(
+                &state,
+                &format!("Failed to override credential helper: {}", stderr),
+                "error",
+            );
+            Err(stderr)
+        }
         Err(e) => {
             add_log(&state, &format!("Failed to override: {}", e), "error");
-            Err(e.to_string())
+            Err(e)
         }
     }
 }
@@ -318,12 +409,16 @@ pub fn get_git_identity() -> GitIdentity {
     let name = Command::new("git")
         .args(["config", "--global", "user.name"])
         .output()
+        .ok()
+        .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
 
     let email = Command::new("git")
         .args(["config", "--global", "user.email"])
         .output()
+        .ok()
+        .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
 
