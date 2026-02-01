@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Git-Shift</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Glass Container -->
+        <div class="glass-panel">
+            <!-- Header -->
+            <header class="header">
+                <div class="header-left">
+                    <h1 class="app-title">Git-Shift</h1>
+                    <p class="datetime" id="datetime"></p>
+                </div>
+                <div class="header-right">
+                    <div class="avatar-strip" id="avatar-strip"></div>
+                </div>
+            </header>
+
+            <!-- Main Content -->
+            <main class="content">
+                <!-- Left Column: Profiles -->
+                <section class="profiles-section">
+                    <h2 class="section-title">Identity Profiles</h2>
+                    <div class="profiles-list" id="profiles-list"></div>
+
+                    <!-- Add Profile Form (hidden by default) -->
+                    <div class="add-profile-form" id="add-form" style="display: none;">
+                        <h3 class="form-title">Add GitHub Profile</h3>
+                        <div class="form-row">
+                            <label>GitHub Username:</label>
+                            <input type="text" id="new-name" placeholder="octocat" />
+                        </div>
+                        <div class="form-row">
+                            <label>GitHub Email:</label>
+                            <input type="text" id="new-email" placeholder="octocat@users.noreply.github.com" />
+                        </div>
+                        <div class="form-actions">
+                            <button class="btn btn-success" id="btn-save">✓ Save</button>
+                            <button class="btn btn-danger" id="btn-cancel">✕ Cancel</button>
+                        </div>
+                    </div>
+
+                    <!-- Add Profile Button -->
+                    <button class="add-profile-btn" id="btn-add">+ Add New Profile</button>
+                </section>
+
+                <!-- Right Column: Command Center -->
+                <section class="command-section">
+                    <h2 class="section-title">Command Center</h2>
+
+                    <!-- Active Config Display -->
+                    <div class="config-display" id="config-display">
+                        <span class="no-selection">No profile selected</span>
+                    </div>
+
+                    <!-- Sync Button -->
+                    <div class="sync-button-container">
+                        <button class="sync-button" id="btn-sync">
+                            <div class="sync-ring"></div>
+                            <div class="sync-inner">
+                                <svg class="play-icon" viewBox="0 0 24 24">
+                                    <polygon points="8,5 19,12 8,19" fill="currentColor" />
+                                </svg>
+                            </div>
+                        </button>
+                    </div>
+
+                    <!-- Alert Button (hidden by default) -->
+                    <button class="alert-button" id="btn-alert" style="display: none;">
+                        ⚠ OVERRIDE SYSTEM CREDENTIALS
+                    </button>
+                </section>
+            </main>
+
+            <!-- Logs Panel -->
+            <div class="logs-panel">
+                <div class="logs-content" id="logs-content"></div>
+            </div>
+
+            <!-- Footer -->
+            <footer class="footer">
+                App made by Ritesh • Pyintel.online
+            </footer>
+        </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>
