@@ -365,6 +365,8 @@ pub fn check_credentials(state: State<AppState>) -> CredentialStatus {
 
     CredentialStatus {
         has_conflict,
+
+        
         active_profile_index,
     }
 }
