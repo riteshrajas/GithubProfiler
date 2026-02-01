@@ -29,7 +29,7 @@ impl Profile {
             .to_uppercase();
         Self {
             name: name.to_string(),
-            email: email.to_string(  ),
+            email: email.to_string(),
             initials,
             color,
         }
