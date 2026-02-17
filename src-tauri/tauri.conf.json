@@ -27,11 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "linux": {
-      "targets": ["appimage"],
-      "category": "Utility"
-    },
+    "targets": ["appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -127,6 +127,7 @@ fn add_log(state: &State<AppState>, message: &str, log_type: &str) {
 fn run_git(args: &[&str]) -> Result<std::process::Output, String> {
     Command::new("git")
         .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0") // Suppress interactive prompts
         .output()
         .map_err(|e| format!("git execution failed: {}", e))
 }
@@ -197,6 +198,34 @@ pub fn add_profile(state: State<AppState>, name: String, email: String) -> Profi
 
     add_log(&state, &format!("Profile '{}' added", name), "success");
     profile
+}
+
+#[tauri::command]
+pub fn update_profile(state: State<AppState>, index: usize, name: String, email: String) -> Result<Profile, String> {
+    let mut profiles = state.profiles.lock().unwrap();
+    if index >= profiles.len() {
+        return Err("Invalid profile index".to_string());
+    }
+
+    let profile = &mut profiles[index];
+    profile.name = name.clone();
+    profile.email = email;
+    
+    // Update initials
+    profile.initials = name
+        .split_whitespace()
+        .take(2)
+        .filter_map(|w| w.chars().next())
+        .collect::<String>()
+        .to_uppercase();
+
+    let updated_profile = profile.clone();
+
+    let active = *state.active_index.lock().unwrap();
+    save_state_to_disk(&profiles, active);
+
+    add_log(&state, &format!("Profile '{}' updated", name), "success");
+    Ok(updated_profile)
 }
 
 #[tauri::command]
@@ -407,22 +436,50 @@ pub fn get_current_time() -> String {
 }
 
 #[tauri::command]
-pub fn get_git_identity() -> GitIdentity {
-    let name = Command::new("git")
-        .args(["config", "--global", "user.name"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
+pub fn get_git_identity(_state: State<AppState>) -> Result<GitIdentity, String> {
+    let name_output = run_git(&["config", "--global", "user.name"])?;
+    let email_output = run_git(&["config", "--global", "user.email"])?;
 
-    let email = Command::new("git")
-        .args(["config", "--global", "user.email"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
+    let name = String::from_utf8_lossy(&name_output.stdout).trim().to_string();
+    let email = String::from_utf8_lossy(&email_output.stdout).trim().to_string();
 
-    GitIdentity { name, email }
+    Ok(GitIdentity { name, email })
+}
+
+#[tauri::command]
+pub fn toggle_autostart(app: tauri::AppHandle, enable: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    
+    // Explicitly annotate error type to help compiler
+    if enable {
+        app.autolaunch().enable().map_err(|e: tauri_plugin_autostart::Error| e.to_string())?;
+    } else {
+        app.autolaunch().disable().map_err(|e: tauri_plugin_autostart::Error| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e: tauri_plugin_autostart::Error| e.to_string())
+}
+#[tauri::command]
+pub async fn fetch_contribution_graph(username: String) -> Result<String, String> {
+    let url = format!("https://github.com/users/{}/contributions", username);
+    let client = reqwest::Client::new();
+    
+    let res = client
+        .get(&url)
+        .header("User-Agent", "git-shift") // GitHub requires a User-Agent
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !res.status().is_success() {
+        return Err(format!("Request failed with status: {}", res.status()));
+    }
+
+    let text = res.text().await.map_err(|e| e.to_string())?;
+    Ok(text)
 }
