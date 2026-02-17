@@ -5,8 +5,10 @@
   "main": "index.js",
   "scripts": {
     "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
+    "dev": "npm run dev --prefix src",
+    "build": "npm run build --prefix src",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "keywords": [
     "git",
