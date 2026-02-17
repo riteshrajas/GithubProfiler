@@ -406,8 +406,10 @@ function showProfileSelectionDialog() {
         `;
         
         profileItem.addEventListener('click', async () => {
-            await selectAndApplyProfile(index);
-            closeProfileSelectionDialog();
+            const success = await selectAndApplyProfile(index);
+            if (success) {
+                closeProfileSelectionDialog();
+            }
         });
         
         modalProfilesList.appendChild(profileItem);
@@ -449,8 +451,12 @@ async function selectAndApplyProfile(index) {
         renderAvatarStrip();
         renderConfigDisplay();
         await refreshLogs();
+        
+        return true; // Success
     } catch (e) {
         console.error('Failed to select and apply profile:', e);
+        alert('Failed to apply profile. Please try again or apply manually.');
+        return false; // Failure
     }
 }
 
