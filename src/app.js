@@ -39,6 +39,8 @@ let profiles = [];
 let activeIndex = null;
 let hasCredentialConflict = false;
 let gitIdentity = { name: '', email: '' };
+let isLoading = true;
+let showProfileSelector = false;
 
 // DOM Elements
 const datetimeEl = document.getElementById('datetime');
@@ -63,6 +65,9 @@ async function init() {
     console.log('Initializing Git-Shift...');
 
     try {
+        // Show loading screen
+        showLoadingScreen();
+
         // Ensure Tauri is available before continuing
         await waitForInvoke();
 
@@ -99,8 +104,12 @@ async function init() {
         setInterval(refreshLogs, 2000);
         
         console.log('Git-Shift initialized successfully');
+        
+        // Hide loading screen
+        hideLoadingScreen();
     } catch (error) {
         console.error('Failed to initialize:', error);
+        hideLoadingScreen();
         logsContentEl.innerHTML = `<div class="log-entry error">Failed to initialize: ${error}</div>`;
     }
 }
@@ -118,6 +127,30 @@ async function updateDateTime() {
             hour: '2-digit',
             minute: '2-digit'
         });
+    }
+}
+
+function showLoadingScreen() {
+    isLoading = true;
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'loading-overlay';
+    loadingOverlay.innerHTML = `
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Initializing Git-Shift...</div>
+        </div>
+    `;
+    document.body.appendChild(loadingOverlay);
+}
+
+function hideLoadingScreen() {
+    isLoading = false;
+    const loadingOverlay = document.getElementById('loading-overlay');
+    if (loadingOverlay) {
+        loadingOverlay.style.opacity = '0';
+        setTimeout(() => {
+            loadingOverlay.remove();
+        }, 300);
     }
 }
 
@@ -321,8 +354,103 @@ async function overrideCredentials() {
         hasCredentialConflict = false;
         renderAlertButton();
         await refreshLogs();
+        
+        // Show profile selector dialog if profiles exist
+        if (profiles.length > 0) {
+            showProfileSelector = true;
+            showProfileSelectionDialog();
+        }
     } catch (e) {
         console.error('Failed to override credentials:', e);
+    }
+}
+
+function showProfileSelectionDialog() {
+    // Create modal overlay
+    const modal = document.createElement('div');
+    modal.id = 'profile-selector-modal';
+    modal.className = 'modal-overlay';
+    
+    const modalContent = document.createElement('div');
+    modalContent.className = 'modal-content';
+    
+    modalContent.innerHTML = `
+        <div class="modal-header">
+            <h2>Select Profile to Apply</h2>
+            <p class="modal-subtitle">Choose which profile to activate now that system credentials have been overridden</p>
+        </div>
+        <div class="modal-profiles" id="modal-profiles-list"></div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+        </div>
+    `;
+    
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+    
+    // Render profiles in modal
+    const modalProfilesList = document.getElementById('modal-profiles-list');
+    profiles.forEach((profile, index) => {
+        const color = rgbToHex(profile.color[0], profile.color[1], profile.color[2]);
+        
+        const profileItem = document.createElement('div');
+        profileItem.className = 'modal-profile-item';
+        profileItem.innerHTML = `
+            <div class="avatar" style="background: ${color}25; border: 1.5px solid ${color}80; color: ${color}">
+                ${profile.initials}
+            </div>
+            <div class="profile-info">
+                <div class="profile-name">${escapeHtml(profile.name)}</div>
+                <div class="profile-email">${escapeHtml(profile.email)}</div>
+            </div>
+        `;
+        
+        profileItem.addEventListener('click', async () => {
+            await selectAndApplyProfile(index);
+            closeProfileSelectionDialog();
+        });
+        
+        modalProfilesList.appendChild(profileItem);
+    });
+    
+    // Cancel button
+    document.getElementById('modal-cancel').addEventListener('click', closeProfileSelectionDialog);
+    
+    // Close on overlay click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeProfileSelectionDialog();
+        }
+    });
+}
+
+function closeProfileSelectionDialog() {
+    const modal = document.getElementById('profile-selector-modal');
+    if (modal) {
+        modal.style.opacity = '0';
+        setTimeout(() => {
+            modal.remove();
+        }, 200);
+    }
+    showProfileSelector = false;
+}
+
+async function selectAndApplyProfile(index) {
+    try {
+        // Select the profile
+        await tauriInvoke('select_profile', { index });
+        activeIndex = await tauriInvoke('get_active_index');
+        
+        // Automatically apply it (switch identity)
+        await tauriInvoke('switch_identity');
+        
+        // Update UI
+        renderProfiles();
+        renderAvatarStrip();
+        renderConfigDisplay();
+        await refreshLogs();
+    } catch (e) {
+        console.error('Failed to select and apply profile:', e);
     }
 }
 
