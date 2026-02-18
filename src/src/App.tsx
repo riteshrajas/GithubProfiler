@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import './App.css';
 import { Sidebar } from './components/layout/Sidebar';
 import { ContributionGraph } from './components/dashboard/ContributionGraph';
 import { CoAuthorGenerator } from './components/labs/CoAuthorGenerator';
@@ -8,28 +9,33 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Loader2, Check, Fingerprint } from 'lucide-react';
+import { Loader2, Check, Fingerprint, Pencil, Save, X, Shield, Mail } from 'lucide-react';
 import { useTauri } from './hooks/useTauri';
 
-// Mock Data for dev
-const MOCK_PROFILES = [
-  { name: 'riteshrajas', email: 'ritesh@example.com', initials: 'RR', color: [100, 200, 255] as [number, number, number] },
-  { name: 'feds-programming', email: 'feds@example.com', initials: 'FP', color: [255, 100, 100] as [number, number, number] }
-];
+interface Profile {
+  name: string;
+  email: string;
+  initials: string;
+  color: [number, number, number];
+}
 
 function App() {
   const { invoke, isReady } = useTauri();
-  const [profiles, setProfiles] = useState<typeof MOCK_PROFILES>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
   const [logs, setLogs] = useState<Array<{ timestamp: string; message: string; log_type: string }>>([]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [applyPhase, setApplyPhase] = useState<'idle' | 'scanning' | 'switching' | 'done'>('idle');
 
   const loadData = async () => {
     try {
-      const p = await invoke<typeof MOCK_PROFILES>('get_profiles');
+      const p = await invoke<Profile[]>('get_profiles');
       const idx = await invoke<number | null>('get_active_index');
       setProfiles(p);
       setActiveIndex(idx);
@@ -53,7 +59,7 @@ function App() {
     if (isReady) {
       loadData();
     } else {
-      setProfiles(MOCK_PROFILES);
+      setProfiles([]);
       setLoading(false);
     }
   }, [isReady]);
@@ -80,13 +86,45 @@ function App() {
   const handleApplyIdentity = async () => {
     if (activeIndex === null) return;
     setApplying(true);
+    setApplyPhase('scanning');
+
+    // Phase 1: Scanning animation
+    await new Promise(r => setTimeout(r, 800));
+    setApplyPhase('switching');
+
     try {
+      // Phase 2: Actually switch
       await invoke('switch_identity');
-      console.log('Switched!');
+      setApplyPhase('done');
+      // Phase 3: Success — hold for a moment
+      await new Promise(r => setTimeout(r, 1200));
     } catch (e) {
       console.error(e);
     } finally {
-      setTimeout(() => setApplying(false), 1000);
+      setApplyPhase('idle');
+      setApplying(false);
+    }
+  };
+
+  const handleStartEdit = () => {
+    if (!activeProfile) return;
+    setEditName(activeProfile.name);
+    setEditEmail(activeProfile.email);
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+  };
+
+  const handleSaveEdit = async () => {
+    if (activeIndex === null) return;
+    try {
+      await invoke('update_profile', { index: activeIndex, name: editName, email: editEmail });
+      await loadData();
+      setIsEditing(false);
+    } catch (e) {
+      console.error('Failed to update profile', e);
     }
   };
 
@@ -114,7 +152,14 @@ function App() {
       <Sidebar
         profiles={profiles}
         activeIndex={activeIndex}
-        onSelect={setActiveIndex}
+        onSelect={async (idx: number) => {
+          setActiveIndex(idx);
+          try {
+            await invoke('select_profile', { index: idx });
+          } catch (e) {
+            console.error('Failed to select profile', e);
+          }
+        }}
         onAdd={() => setIsAddOpen(true)}
         onDelete={(idx: number) => setDeleteIndex(idx)}
       />
@@ -136,10 +181,35 @@ function App() {
               size="lg"
               onClick={handleApplyIdentity}
               disabled={activeIndex === null || applying}
-              className={applying ? "bg-green-600 hover:bg-green-700" : ""}
+              className={`relative overflow-hidden transition-all duration-500 min-w-[180px] ${applyPhase === 'done' ? 'bg-green-600 hover:bg-green-700 shadow-[0_0_20px_rgba(34,197,94,0.4)]' :
+                applyPhase !== 'idle' ? 'bg-primary/80' : ''
+                }`}
             >
-              {applying ? <Check className="mr-2 h-4 w-4" /> : <Fingerprint className="mr-2 h-4 w-4" />}
-              {applying ? "Applied Identity" : "Apply Identity"}
+              {applyPhase === 'scanning' && (
+                <>
+                  <Shield className="mr-2 h-4 w-4 animate-pulse" />
+                  <span className="animate-pulse">Scanning...</span>
+                  <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent apply-shimmer" />
+                </>
+              )}
+              {applyPhase === 'switching' && (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Switching Identity...
+                </>
+              )}
+              {applyPhase === 'done' && (
+                <>
+                  <Check className="mr-2 h-4 w-4 apply-pop" />
+                  Identity Applied!
+                </>
+              )}
+              {applyPhase === 'idle' && (
+                <>
+                  <Fingerprint className="mr-2 h-4 w-4" />
+                  Apply Identity
+                </>
+              )}
             </Button>
           </div>
         </header>
@@ -155,26 +225,61 @@ function App() {
           </Card>
 
           <Card className="col-span-3">
-            <CardHeader>
-              <CardTitle>Active Configuration</CardTitle>
-              <CardDescription>Current global git settings</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <div>
+                <CardTitle>Active Configuration</CardTitle>
+                <CardDescription>Current global git settings</CardDescription>
+              </div>
+              {activeProfile && !isEditing && (
+                <Button variant="ghost" size="icon" onClick={handleStartEdit} title="Edit profile">
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
               {activeProfile ? (
                 <div className="space-y-4">
                   <div className="flex items-center space-x-4 rounded-md border p-4">
-                    <Fingerprint />
+                    <Fingerprint className="shrink-0" />
                     <div className="flex-1 space-y-1">
                       <p className="text-sm font-medium leading-none">user.name</p>
-                      <p className="text-sm text-muted-foreground">{activeProfile.name}</p>
+                      {isEditing ? (
+                        <input
+                          value={editName}
+                          onChange={e => setEditName(e.target.value)}
+                          className="w-full mt-1 px-2 py-1 text-sm rounded-md border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          autoFocus
+                        />
+                      ) : (
+                        <p className="text-sm text-muted-foreground">{activeProfile.name}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Mail className="shrink-0" />
                     <div className="flex-1 space-y-1">
                       <p className="text-sm font-medium leading-none">user.email</p>
-                      <p className="text-sm text-muted-foreground">{activeProfile.email}</p>
+                      {isEditing ? (
+                        <input
+                          value={editEmail}
+                          onChange={e => setEditEmail(e.target.value)}
+                          className="w-full mt-1 px-2 py-1 text-sm rounded-md border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      ) : (
+                        <p className="text-sm text-muted-foreground">{activeProfile.email}</p>
+                      )}
                     </div>
                   </div>
+                  {isEditing && (
+                    <div className="flex gap-2 justify-end">
+                      <Button variant="ghost" size="sm" onClick={handleCancelEdit}>
+                        <X className="mr-1 h-3 w-3" /> Cancel
+                      </Button>
+                      <Button size="sm" onClick={handleSaveEdit}>
+                        <Save className="mr-1 h-3 w-3" /> Save
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">No profile active</div>
