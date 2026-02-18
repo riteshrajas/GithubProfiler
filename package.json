@@ -8,7 +8,8 @@
     "dev": "npm run dev --prefix src",
     "build": "npm run build --prefix src",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "postinstall": "npm install --prefix src"
   },
   "keywords": [
     "git",
